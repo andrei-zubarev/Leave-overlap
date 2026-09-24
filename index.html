@@ -10,19 +10,33 @@
   --tx:#e6edf3; --tx2:#8b98a9; --accent:#4c9aff; --accent2:#70ad47;
   --chip:#1b2432; --shadow:0 8px 30px rgba(0,0,0,.45);
   --beam:#8fb0e8; --beamop:.10;
+  --glass-hi:rgba(255,255,255,.07); --glass-lo:rgba(0,0,0,.22);
+  /* Раскладка сетки. Значения дублируются в JS (metrics()) -- он же и
+     главный: перед первым кадром проставляет их сюда инлайном. Здесь они
+     заданы, чтобы страница успела отрисоваться правильно до запуска
+     скрипта и чтобы медиазапросы ниже работали без него. */
+  --names-w:262px; --hdr-h:46px; --strip-h:64px; --panel-w:300px;
 }
 html[data-theme="light"]{
   --bg:#eef2f7; --bg2:#f7f9fc; --panel:#ffffff; --line:#d3dbe6;
   --tx:#1b2430; --tx2:#5d6b7d; --accent:#2f6fd0; --accent2:#4b8b2e;
   --chip:#e7edf5; --shadow:0 8px 26px rgba(30,50,80,.14);
   --beam:#ffe6b8; --beamop:.30;
+  --glass-hi:rgba(255,255,255,.85); --glass-lo:rgba(30,50,80,.08);
 }
+/* Узкий экран: колонка с фамилиями ужимается, полоса нагрузки ниже.
+   --panel-w здесь 0, потому что «Сводка» на узком экране не колонка справа,
+   а выдвижной ящик поверх всего. */
+@media (max-width:760px){ :root{--names-w:120px; --strip-h:52px; --panel-w:0px} }
+@media (max-width:430px){ :root{--names-w:96px;  --strip-h:48px; --panel-w:0px} }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0; background:var(--bg); color:var(--tx); overflow:hidden;
   font:13px/1.4 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;
+  overscroll-behavior:none;
 }
 #bg{position:fixed;inset:0;width:100%;height:100%;z-index:0;display:block}
 /* Луч солнца. Статичный градиент поверх фона, под интерфейсом: рисуется
@@ -35,7 +49,10 @@ body{
     transparent 14%, var(--beam) 40%, transparent 66%);
   transition:opacity .4s ease;
 }
-.wrap{position:relative;z-index:1;height:100%;display:flex;flex-direction:column}
+/* Высота окна, а не документа: на телефоне адресная строка браузера
+   убирается и возвращается, и от height:100% низ уезжает под неё. dvh
+   считает именно видимую сейчас высоту; где его нет, остаётся 100%. */
+.wrap{position:relative;z-index:1;height:100%;height:100dvh;display:flex;flex-direction:column}
 
 header{
   display:flex;align-items:center;gap:14px;padding:10px 16px;
@@ -45,6 +62,9 @@ header{
 h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
 h1 small{display:block;font-weight:400;font-size:11px;color:var(--tx2);margin-top:1px}
 .spacer{flex:1}
+/* Кнопки и поля собраны в одну строку, чтобы на узком экране её можно было
+   прокрутить по горизонтали, а не ломать шапку на три этажа. */
+.tools{display:flex;align-items:center;gap:8px;min-width:0}
 button,select,input{font:inherit;color:var(--tx)}
 .btn{
   background:var(--chip);border:1px solid var(--line);border-radius:8px;
@@ -77,12 +97,18 @@ input[type=search],select{
 input[type=search]{width:190px}
 input[type=search]:focus,select:focus{border-color:var(--accent)}
 
-main{flex:1;display:flex;min-height:0}
-#stage{flex:1;position:relative;min-width:0;overflow:hidden;user-select:none}
+main{flex:1;display:flex;min-height:0;position:relative}
+#stage{flex:1;position:relative;min-width:0;overflow:hidden;user-select:none;
+  -webkit-user-select:none;touch-action:none}
 #grid{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
 #ovl{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 
-#colhead{position:absolute;left:0;right:0;top:0;height:46px;pointer-events:none}
+/* Шапка закреплена: сетка уходит под неё, а не поверх. Подложка нужна,
+   чтобы подписи месяцев и чисел читались на фоне пыли. */
+#colhead{position:absolute;left:0;right:0;top:0;height:var(--hdr-h);pointer-events:none;
+  background:color-mix(in srgb, var(--bg2) 74%, transparent);
+  backdrop-filter:blur(9px);
+  border-bottom:1px solid var(--line)}
 .mhead{position:absolute;top:0;height:20px;font-size:11px;font-weight:600;
   text-align:center;color:var(--tx2);border-left:1px solid var(--line);
   overflow:hidden;white-space:nowrap}
@@ -91,9 +117,30 @@ main{flex:1;display:flex;min-height:0}
 .dhead b{display:block;font-weight:600;color:var(--tx)}
 .dhead.we b{color:#e5707a}
 
-#names{position:absolute;left:0;top:46px;bottom:64px;width:262px;
-  background:color-mix(in srgb, var(--bg) 78%, transparent);
-  border-right:1px solid var(--line);overflow:hidden}
+/* Панели — «жидкое стекло»: полупрозрачная заливка + размытие того, что
+   позади (фон и пыль). Тонкая светлая грань по внутреннему краю даёт
+   ощущение толщины стекла; в тёмной теме она белая, в светлой тоже
+   белая, но плотнее -- на белом фоне иначе не читается. */
+#names{position:absolute;left:0;top:var(--hdr-h);bottom:var(--strip-h);width:var(--names-w);
+  background:color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter:blur(11px) saturate(150%);
+  border-right:1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  box-shadow:inset -1px 0 0 var(--glass-hi);
+  overflow:hidden}
+/* Угол под колонкой с фамилиями -- то же стекло, что и сама колонка.
+   Нужен ради полосы нагрузки: она рисуется на холсте сетки во всю ширину и
+   при прокрутке уезжает влево, за границу колонки. Колонка до низа не
+   доходит (её низ -- верх полосы), поэтому без этого угла уехавшие столбики
+   оказывались на голом фоне -- резкие и неразмытые, в отличие от правого
+   конца, который уходит под «Сводку» и там размывается. Колонку до низа
+   растянуть нельзя: layoutNames() отдаёт последнюю строку с запасом в
+   высоту строки, и она вылезла бы поверх полосы. */
+#gleft{position:absolute;left:0;bottom:0;width:var(--names-w);height:var(--strip-h);
+  background:color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter:blur(11px) saturate(150%);
+  border-right:1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-top:1px solid var(--line);
+  box-shadow:inset -1px 0 0 var(--glass-hi)}
 .nrow{position:absolute;left:0;right:0;display:flex;align-items:center;gap:7px;
   padding:0 8px;white-space:nowrap;overflow:hidden;border-bottom:1px solid
   color-mix(in srgb, var(--line) 45%, transparent)}
@@ -101,19 +148,53 @@ main{flex:1;display:flex;min-height:0}
 .nrow .t{font-size:11px;overflow:hidden;text-overflow:ellipsis}
 .nrow .tn{opacity:.55;font-size:10px;flex:none}
 
-#strip{position:absolute;left:262px;right:0;bottom:0;height:64px;
-  background:color-mix(in srgb, var(--bg2) 86%, transparent);
-  border-top:1px solid var(--line)}
-#strip .cap{position:absolute;left:8px;top:3px;font-size:10px;color:var(--tx2)}
-#strip canvas{position:absolute;left:0;right:0;bottom:0;width:100%;height:48px}
+/* Подложка полосы. Столбики нагрузки рисуются на холсте сетки, а этот
+   элемент лежит ПОВЕРХ холста (порядок отрисовки: #grid, потом #ovl, потом
+   #strip), поэтому его плотность -- это то, насколько столбики приглушены:
+   при 86 % до глаза доходило 14 % цвета, и полоса читалась бледной. 24.09.2026
+   плотность снижена до 60 % -- столбики стали видны примерно втрое сильнее.
+   Дальше снижать не стоит: подложка держит контраст подписи над столбиками.
 
+   Справа полоса кончается там же, где кончается сетка -- у левого края
+   «Сводки». Раньше она шла до правого края окна, то есть подложка заходила
+   под панель, и правый угол выглядел иначе, чем остальная полоса: на нём
+   лежало ещё и стекло «Сводки». Столбики же по-прежнему рисуются во всю
+   ширину холста, поэтому при увеличении они УХОДЯТ под «Сводку» и там
+   размываются -- это и есть стекло, а вот подложка под панель не заходит.
+
+   Верх полосы -- граница отсечения сетки (см. scissor в drawGL): полоса
+   такая же закреплённая, как шапка, и ящики на неё не заходят. */
+#strip{position:absolute;left:var(--names-w);right:var(--panel-w);bottom:0;
+  height:var(--strip-h);
+  background:color-mix(in srgb, var(--bg2) 60%, transparent);
+  border-top:1px solid var(--line)}
+#strip .cap{position:absolute;left:8px;top:3px;font-size:10px;color:var(--tx2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;right:8px}
+#strip canvas{position:absolute;left:0;right:0;bottom:0;width:100%;
+  height:calc(var(--strip-h) - 16px)}
+
+/* «Сводка» лежит ПОВЕРХ холста, а не рядом с ним. Это и даёт стекло: под
+   панелью проходят сетка и пыль, и размывать есть что. Колонкой во flex она
+   тоже была полупрозрачной, но за ней был ровный фон страницы -- просвечивать
+   было нечего, и панель читалась как плотная заливка. */
+/* «Сводка» -- то же стекло, что и колонка с фамилиями: та же основа, та же
+   плотность, тот же радиус размытия. Раньше она брала --panel (светлее фона)
+   при 68 %, поэтому читалась плотной заливкой рядом с полупрозрачной левой
+   колонкой, хотя обе были «прозрачными». Материал должен быть один; если
+   понадобится поменять -- менять обе панели разом. */
 aside{
-  width:300px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+  position:absolute;right:0;top:0;bottom:0;width:300px;z-index:3;
+  background:color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter:blur(11px) saturate(150%);
+  border-left:1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  box-shadow:inset 1px 0 0 var(--glass-hi);
   display:flex;flex-direction:column;min-height:0;
 }
 aside.hide{display:none}
 aside h2{font-size:12px;margin:0;padding:11px 14px;border-bottom:1px solid var(--line);
-  font-weight:600;letter-spacing:.2px}
+  font-weight:600;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+aside h2 .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sumx{display:none;padding:2px 9px;line-height:1.1;font-size:16px}
 #panelBody{overflow:auto;padding:10px 14px 20px;font-size:12px}
 .kpi{display:grid;grid-template-columns:1fr auto;gap:5px 10px;margin-bottom:14px}
 .kpi div:nth-child(odd){color:var(--tx2)}
@@ -138,6 +219,52 @@ aside h2{font-size:12px;margin:0;padding:11px 14px;border-bottom:1px solid var(-
   padding:7px 14px;font-size:11px;color:var(--tx2);box-shadow:var(--shadow)}
 #note.hide{display:none}
 .hint{color:var(--tx2);font-size:11px}
+#sum{display:none}
+@media (max-width:760px){ #sum{display:inline-block} }
+
+/* ---- узкий экран ------------------------------------------------------
+   Три вещи мешают на телефоне: шапка с кнопками шире экрана, «Сводка»
+   занимает треть и без того узкой сетки, и подсказка при наведении, которой
+   на касании не существует. Поэтому: шапка в одну прокручиваемую строку,
+   «Сводка» -- выдвижной ящик снизу, подсказка выключена. */
+@media (max-width:760px){
+  header{gap:10px;padding:8px 10px}
+  h1{font-size:13px;flex:0 1 auto;min-width:0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  h1 small{display:none}
+  .spacer{display:none}
+  .tools{flex:1;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tools::-webkit-scrollbar{display:none}
+  /* «Сводка» и тема -- всегда на виду: если оставить их в общем порядке,
+     они уезжают за правый край прокручиваемой строки, и до главной на
+     телефоне кнопки ещё надо догадаться долистать. */
+  #sum{order:-2}
+  #theme{order:-1}
+  #q{width:132px;flex:none}
+  #grp{max-width:132px}
+  .btn{padding:6px 9px;white-space:nowrap}
+
+  .bar{padding:6px 10px}
+  #tabs{flex-wrap:nowrap;overflow-x:auto;width:100%;scrollbar-width:none;
+    -webkit-overflow-scrolling:touch}
+  #tabs::-webkit-scrollbar{display:none}
+  .tab{flex:none}
+
+  /* ящик закрыт: сдвинут вниз на всю свою высоту */
+  aside{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;height:68vh;
+    height:68dvh;z-index:9;border-left:none;border-top:1px solid var(--line);
+    border-radius:14px 14px 0 0;box-shadow:0 -12px 34px rgba(0,0,0,.42);
+    transform:translateY(101%);transition:transform .22s ease}
+  aside.open{transform:none}
+  #sumx{display:inline-block}
+  #panelBody{padding-bottom:26px}
+  #tip{display:none !important}
+
+  /* в узкой колонке табельный номер не помещается -- остаётся фамилия */
+  .nrow{padding:0 5px;gap:5px}
+  .nrow .tn{display:none}
+  .nrow .t{font-size:10.5px}
+}
 </style>
 </head>
 <body>
@@ -148,11 +275,14 @@ aside h2{font-size:12px;margin:0;padding:11px 14px;border-bottom:1px solid var(-
     <h1>Отпуска УГИ 2027
       <small id="built">интерактивный график пересечений отпусков</small></h1>
     <div class="spacer"></div>
-    <input type="search" id="q" placeholder="поиск по ФИО…">
-    <select id="grp"><option value="">все группы</option></select>
-    <button class="btn" id="fit">Вся сетка</button>
-    <button class="btn" id="today">Сегодня</button>
-    <button class="btn" id="theme" title="Сменить тему">🌙</button>
+    <div class="tools">
+      <input type="search" id="q" placeholder="поиск по ФИО…">
+      <select id="grp"><option value="">все группы</option></select>
+      <button class="btn" id="fit">Вся сетка</button>
+      <button class="btn" id="today">Сегодня</button>
+      <button class="btn" id="theme" title="Сменить тему">🌙</button>
+      <button class="btn" id="sum" title="Сводка">Сводка</button>
+    </div>
   </header>
 
   <div class="bar"><div id="tabs"></div></div>
@@ -163,14 +293,16 @@ aside h2{font-size:12px;margin:0;padding:11px 14px;border-bottom:1px solid var(-
       <div id="ovl">
         <div id="colhead"></div>
         <div id="names"></div>
+        <div id="gleft"></div>
       </div>
       <div id="strip">
-        <div class="cap">Нагрузка по дням — наведите или щёлкните по дню</div>
+        <div class="cap">Нагрузка по дням — нажмите день на сетке или на полосе</div>
         <canvas id="load"></canvas>
       </div>
     </div>
     <aside id="panel">
-      <h2>Сводка</h2>
+      <h2><span class="t">Сводка</span>
+        <button class="btn" id="sumx" title="Закрыть">×</button></h2>
       <div id="panelBody"></div>
     </aside>
   </main>
@@ -187,7 +319,30 @@ window.__DATA__ = {"year":2027,"built":"УГИ 22.09.2026","total":666,"services
 const D = window.__DATA__;
 const YEAR = D.year;
 const DAYS = 365;
-const NAMES_W = 262, HDR_H = 46, STRIP_H = 64;
+const NAMES_W_DEF = 262, HDR_H = 46, STRIP_H_DEF = 64;
+let NAMES_W = NAMES_W_DEF, STRIP_H = STRIP_H_DEF;
+/* Раскладка под ширину экрана. Числа те же, что в медиазапросах CSS: от
+   ширины колонки с фамилиями зависит и разметка, и начало отсчёта сетки на
+   холсте, поэтому источник должен быть один -- эта функция. Она же
+   выставляет значения в CSS, чтобы разметка и холст не разъехались. */
+function metrics(){
+  const w = window.innerWidth;
+  if(w <= 430) return {names:96,  strip:48};
+  if(w <= 760) return {names:120, strip:52};
+  return {names:NAMES_W_DEF, strip:STRIP_H_DEF};
+}
+function applyMetrics(){
+  const m = metrics();
+  NAMES_W = m.names; STRIP_H = m.strip;
+  const s = document.documentElement.style;
+  s.setProperty("--names-w", m.names+"px");
+  s.setProperty("--strip-h", m.strip+"px");
+  s.setProperty("--hdr-h", HDR_H+"px");
+  /* Ширина «Сводки» измеряется, а не берётся из медиазапроса: полоса нагрузки
+     должна кончаться ровно у её края, а на узком экране панель вообще не
+     колонка, а ящик, и тогда ширина нулевая. */
+  s.setProperty("--panel-w", panelW()+"px");
+}
 const isLeap = (YEAR%4===0 && YEAR%100!==0) || YEAR%400===0;
 const NDAYS = isLeap?366:365;
 const MON = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август",
@@ -226,7 +381,7 @@ let hoverR = -1, hoverD = -1, dirtyOv = true, dirtyData = true;
    tint -- цвет пылинки ВНЕ луча, sun -- попавшей в луч. */
 let tintNow = [0.42,0.62,1.0], tintTarget = [0.42,0.62,1.0];
 let sunNow  = [0.62,0.76,1.0], sunTarget  = [0.62,0.76,1.0];
-let particleAlpha = 0.30;
+let particleAlpha = 1.01;
 
 /* ---- тема ------------------------------------------------------------- */
 const root = document.documentElement;
@@ -243,10 +398,12 @@ function setTheme(t, save){
      самыми бледными. В тёмной теме это значит "ярче фона", в светлой --
      "темнее фона": в светлом поле пыль читается тёмными крупинками.
      Раньше в светлой теме u_sun был светлее u_tint -- контраст падал ровно
-     там, где росла альфа, и пыль пропадала. */
+     там, где росла альфа, и пыль пропадала.
+     Оба числа -- яркость пыли; 24.09.2026 их сначала снизили на 10 %
+     (1.60 / 2.20), потом ещё на 30 % -- пыль перебивала чтение сетки. */
   tintTarget = (t==="dark") ? [0.50,0.62,0.88] : [0.72,0.73,0.76];
   sunTarget  = (t==="dark") ? [0.78,0.86,1.00] : [0.30,0.31,0.35];
-  particleAlpha = (t==="dark") ? 0.30 : 0.38;
+  particleAlpha = (t==="dark") ? 1.01 : 1.39;
 }
 setTheme(readTheme(), false);
 
@@ -305,9 +462,21 @@ function buildView(){
   dirtyOv = true; dirtyData = true;
 }
 
+/* Сколько ширины холста перекрыто «Сводкой». Панель лежит поверх сетки,
+   поэтому подбирать масштаб и границы прокрутки надо по видимой части --
+   иначе «Вся сетка» уместит год целиком, а правая треть уедет под стекло.
+   На узком экране панель выдвигается снизу и ширины не отнимает. */
+function panelW(){
+  const p = document.getElementById("panel");
+  if(!p) return 0;
+  const cs = getComputedStyle(p);
+  if(cs.display === "none" || cs.position !== "absolute") return 0;
+  return p.offsetWidth;
+}
+
 function fit(){
   const st = document.getElementById("stage");
-  const w = st.clientWidth - NAMES_W;
+  const w = st.clientWidth - NAMES_W - panelW();
   const h = st.clientHeight - HDR_H - STRIP_H;
   cam.sx = w / NDAYS;
   cam.sy = Math.max(11, Math.min(22, h / Math.max(1, rows.length)));
@@ -523,7 +692,8 @@ function buildParticles(){
   const c = glbg;
   if(partSeed){ c.deleteBuffer(partSeed); partSeed = null; }
   if(partParam){ c.deleteBuffer(partParam); partParam = null; }
-  NPART = Math.min(1300, Math.max(380, Math.round(window.innerWidth*0.45)));
+  /* +15 % к прежнему количеству (было 1300 / 380 / 0.45) */
+  NPART = Math.min(1500, Math.max(440, Math.round(window.innerWidth*0.52)));
   const seed = new Float32Array(NPART*4), par = new Float32Array(NPART*4);
   for(let i=0;i<NPART;i++){
     /* глубина по корню: мелкой пыли должно быть больше, чем крупной */
@@ -631,7 +801,21 @@ function drawGL(){
   /* перевод пикселей CSS -> пиксели буфера */
   gl.uniform2f(qp.u_origin, (NAMES_W-cam.ox)*dpr, (HDR_H-cam.oy)*dpr);
   gl.uniform2f(qp.u_cell, cam.sx*dpr, cam.sy*dpr);
+  /* Шапка с месяцами и числами закреплена: при зуме и прокрутке сетка
+     уходит ПОД неё, а не поверх. Начало отсчёта сетки -- HDR_H-cam.oy,
+     поэтому без отсечения строки залезали в шапку. В координатах GL
+     отсчёт снизу, так что верхняя полоса -- это остаток высоты.
+     Полоса нагрузки снизу закреплена точно так же. Строк с "ящиками"
+     заведомо больше, чем влезает в окно (666 человек при строке в 11
+     точек -- это семь тысяч точек высоты), поэтому нижняя граница
+     отсечения -- не край холста, а ВЕРХ полосы: иначе при прокрутке
+     ящики заходили на график. Столбики самой полосы рисуются ниже,
+     уже без отсечения, -- им эта граница не мешает. */
+  gl.enable(gl.SCISSOR_TEST);
+  const yTop = Math.round((H-HDR_H)*dpr), yLow = Math.round(STRIP_H*dpr);
+  gl.scissor(0, yLow, glc.width, Math.max(0, yTop-yLow));
   if(lastInst) INF.draw(lastInst);
+  gl.disable(gl.SCISSOR_TEST);
 
   /* полоса нагрузки */
   const sh2 = H - STRIP_H, sy2 = 46;
@@ -687,6 +871,13 @@ function draw2D(){
   if(glc.width !== Math.round(W*dpr)){ glc.width=Math.round(W*dpr); glc.height=Math.round(H*dpr); }
   g2.setTransform(dpr,0,0,dpr,0,0);
   g2.clearRect(0,0,W,H);
+  /* Отсечение то же, что и в WebGL: сетка не заходит ни в шапку,
+     ни на полосу нагрузки, -- иначе ящики при прокрутке ложатся
+     на график. Столбики полосы рисует drawLoad2D на своём холсте. */
+  g2.save();
+  g2.beginPath();
+  g2.rect(0, HDR_H, W, Math.max(0, H-HDR_H-STRIP_H));
+  g2.clip();
   g2.fillStyle = (root.getAttribute("data-theme")==="light") ? "#5d6b7d" : "#243040";
   for(let i=0;i<NDAYS;i++){
     if(MD[i].wd<5) continue;
@@ -700,6 +891,7 @@ function draw2D(){
                   Math.max(1,v[1]*cam.sx), Math.max(1,cam.sy-2));
     }
   }
+  g2.restore();
   drawLoad2D();
 }
 function drawLoad2D(){
@@ -714,7 +906,11 @@ function drawLoad2D(){
     if(!v) continue;
     const f = v/m;
     c2.fillStyle = v>peak*0.8 ? "#e5534b" : v>peak*0.5 ? "#e0a53c" : "#4fa86a";
-    c2.fillRect(NAMES_W-cam.ox+i*cam.sx, H*(1-f), Math.max(1,cam.sx), H*f);
+    /* Холст полосы начинается у ЛЕВОГО КРАЯ самой полосы, то есть на NAMES_W
+       правее начала холста сетки, поэтому день отсчитывается от -cam.ox, а не
+       от NAMES_W-cam.ox. С прежним смещением все столбики уезжали за правый
+       край холста, и в фолбэке без WebGL полоса оставалась пустой. */
+    c2.fillRect(-cam.ox+i*cam.sx, H*(1-f), Math.max(1,cam.sx), H*f);
   }
 }
 
@@ -863,7 +1059,7 @@ function hideTip(){ tip.style.display = "none"; }
    ====================================================================== */
 function clampCam(){
   const st = document.getElementById("stage");
-  const gw = st.clientWidth - NAMES_W;
+  const gw = st.clientWidth - NAMES_W - panelW();
   const gh = st.clientHeight - HDR_H - STRIP_H;
   const maxOx = Math.max(0, NDAYS*cam.sx - gw);
   cam.ox = Math.max(0, Math.min(cam.ox, maxOx));
@@ -924,6 +1120,69 @@ stage.addEventListener("wheel", function(e){
   }
   clampCam(); dirtyOv = true;
 }, {passive:false});
+
+/* ---- касания ---------------------------------------------------------
+   Мышь и палец -- разные жесты, поэтому обработчики отдельные, а не общие:
+   у касания два состояния сразу (прокрутка одним пальцем и щипок двумя),
+   и оно само решает, когда отпускание считается выбором дня, а когда --
+   концом перетаскивания. */
+let pinch = null;
+function touchStart(e){
+  hideTip();
+  if(e.touches.length === 1){
+    const t = e.touches[0];
+    drag = {x:t.clientX, y:t.clientY, ox:cam.ox, oy:cam.oy, moved:false};
+    pinch = null;
+  } else if(e.touches.length === 2){
+    drag = null;
+    const a = e.touches[0], b = e.touches[1];
+    pinch = {d:Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY)};
+  }
+  e.preventDefault();
+}
+function touchMove(e){
+  if(pinch && e.touches.length === 2){
+    const a = e.touches[0], b = e.touches[1];
+    const d = Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+    if(pinch.d > 8 && d > 8){
+      const rc = stage.getBoundingClientRect();
+      const mx = (a.clientX+b.clientX)/2 - rc.left;
+      const my = (a.clientY+b.clientY)/2 - rc.top;
+      const gx = (mx - NAMES_W + cam.ox)/cam.sx, gy = (my - HDR_H + cam.oy)/cam.sy;
+      const k = d/pinch.d;
+      cam.sx = Math.max(0.6, Math.min(46, cam.sx*k));
+      cam.sy = Math.max(3, Math.min(60, cam.sy*k));
+      cam.ox = gx*cam.sx - (mx - NAMES_W);
+      cam.oy = gy*cam.sy - (my - HDR_H);
+      clampCam(); dirtyOv = true;
+    }
+    pinch.d = d;
+    e.preventDefault();
+    return;
+  }
+  if(drag && e.touches.length === 1){
+    const t = e.touches[0];
+    const dx = t.clientX-drag.x, dy = t.clientY-drag.y;
+    /* порог больше, чем у мыши: живой палец всегда немного ведёт */
+    if(Math.abs(dx) > 8 || Math.abs(dy) > 8) drag.moved = true;
+    cam.ox = drag.ox - dx; cam.oy = drag.oy - dy;
+    clampCam(); dirtyOv = true;
+    e.preventDefault();
+  }
+}
+function touchEnd(e){
+  if(drag && !drag.moved && e.changedTouches.length){
+    const t = e.changedTouches[0];
+    const rc = stage.getBoundingClientRect();
+    const c = px2cell(t.clientX-rc.left, t.clientY-rc.top);
+    if(c.d>=0 && c.d<NDAYS){ cur.day = c.d; renderPanel(); dirtyData = true; }
+  }
+  if(!e.touches.length){ drag = null; pinch = null; }
+}
+stage.addEventListener("touchstart", touchStart, {passive:false});
+stage.addEventListener("touchmove",  touchMove,  {passive:false});
+stage.addEventListener("touchend",   touchEnd);
+stage.addEventListener("touchcancel", function(){ drag = null; pinch = null; });
 
 /* ---- панель управления ---------------------------------------------- */
 function buildTabs(){
@@ -986,13 +1245,22 @@ document.getElementById("today").addEventListener("click", function(){
   if(TODAY<0){ flash("Сегодняшняя дата вне "+YEAR+" года"); return; }
   cur.day = TODAY;
   const st = document.getElementById("stage");
-  const gw = st.clientWidth - NAMES_W;
+  const gw = st.clientWidth - NAMES_W - panelW();
   cam.ox = Math.max(0, Math.min(TODAY*cam.sx - gw/2, NDAYS*cam.sx - gw));
   clampCam(); dirtyOv = true; dirtyData = true; renderPanel();
 });
 document.getElementById("theme").addEventListener("click", function(){
   setTheme(root.getAttribute("data-theme")==="dark" ? "light":"dark", true);
   ovHeadLast = ovNamesLast = ""; dirtyData = true;
+});
+/* На узком экране «Сводка» -- выдвижной ящик снизу: на широком она и так
+   стоит справа, и кнопка скрыта стилями. */
+const panel = document.getElementById("panel");
+document.getElementById("sum").addEventListener("click", function(){
+  panel.classList.toggle("open");
+});
+document.getElementById("sumx").addEventListener("click", function(){
+  panel.classList.remove("open");
 });
 let noteTimer=null;
 function flash(msg){
@@ -1005,6 +1273,7 @@ function flash(msg){
 /* ---- размеры --------------------------------------------------------- */
 function resize(){
   const st = document.getElementById("stage");
+  applyMetrics();
   colhead.style.height = HDR_H+"px";
   fit(); buildInstances(); ovHeadLast = ovNamesLast = "";
 }
@@ -1055,6 +1324,7 @@ document.getElementById("built").textContent =
   "интерактивный график пересечений отпусков · данных от " + D.built;
 
 ok = initGL();
+applyMetrics();       /* до первой раскладки: холст и разметка берут ширины отсюда */
 buildView();          /* обязан быть до resize()/renderPanel(): заполняет rows, byDay, stripCurve */
 buildTabs();
 fillGroups();
